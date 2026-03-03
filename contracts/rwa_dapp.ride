@@ -1,0 +1,92 @@
+# ──────────────────────────────────────────────────────────────
+#  RWA Marketplace dApp Script — DecentralChain (RIDE v6)
+# ──────────────────────────────────────────────────────────────
+#  Deployed to the marketplace account. Handles:
+#    • Buying fractional RWA tokens with CRS
+#    • Collecting the 2 % DCC marketplace fee
+#    • KYC whitelist management (issuer-only)
+# ──────────────────────────────────────────────────────────────
+
+{-# STDLIB_VERSION 6 #-}
+{-# CONTENT_TYPE DAPP #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+
+# ── Constants ────────────────────────────────────────────────
+let admin        = addressFromStringValue("3P_ADMIN_ADDRESS_HERE")
+let feeCollector = addressFromStringValue("3P_FEE_COLLECTOR_HERE")
+let dccAssetId   = base58'DCC_ASSET_ID_HERE'
+let crsAssetId   = base58'CRS_ASSET_ID_HERE'
+let feeBps       = 200   # 2 %
+
+# ──────────────────────────────────────────────────────────────
+#  @callable  buyFractions
+#  Buyer attaches:
+#    payment[0] = CRS amount (price × quantity)
+#    payment[1] = DCC amount (2 % fee)
+#  Args:
+#    rwaAssetId — base58 ID of the fractional RWA token
+#    quantity   — number of fractions to purchase
+# ──────────────────────────────────────────────────────────────
+@Callable(i)
+func buyFractions(rwaAssetId: String, quantity: Int) = {
+
+  # Validate payments
+  let crsPayment = i.payments[0]
+  let dccPayment = i.payments[1]
+
+  let rwaId = fromBase58String(rwaAssetId)
+
+  # Ensure CRS payment
+  if (crsPayment.assetId != crsAssetId) then throw("First payment must be CRS")
+  else if (dccPayment.assetId != dccAssetId) then throw("Second payment must be DCC (fee)")
+  else {
+
+    # Calculate expected fee: 2 % of CRS value, converted to DCC off-chain
+    let minFee = fraction(crsPayment.amount, feeBps, 10000)
+
+    if (dccPayment.amount < minFee) then throw("DCC fee too low — need at least 2 % equivalent")
+    else {
+      # Check buyer is whitelisted
+      let buyerAddr = toBase58String(i.caller.bytes)
+      let kycStatus = getStringValue(this, "kyc_" + buyerAddr)
+
+      if (kycStatus != "verified") then throw("Buyer is not KYC-verified")
+      else {
+        # Transfer fractional tokens to buyer
+        # Store the CRS in the dApp (escrow for the asset issuer)
+        [
+          ScriptTransfer(i.caller, quantity, rwaId),
+          ScriptTransfer(feeCollector, dccPayment.amount, dccAssetId),
+          IntegerEntry("sold_" + rwaAssetId, getIntegerValue(this, "sold_" + rwaAssetId) + quantity)
+        ]
+      }
+    }
+  }
+}
+
+# ──────────────────────────────────────────────────────────────
+#  @callable  addToWhitelist
+#  Admin-only: mark an address as KYC-verified
+# ──────────────────────────────────────────────────────────────
+@Callable(i)
+func addToWhitelist(userAddress: String) = {
+  if (i.caller != admin) then throw("Only admin can whitelist")
+  else {
+    [
+      StringEntry("kyc_" + userAddress, "verified")
+    ]
+  }
+}
+
+# ──────────────────────────────────────────────────────────────
+#  @callable  removeFromWhitelist
+# ──────────────────────────────────────────────────────────────
+@Callable(i)
+func removeFromWhitelist(userAddress: String) = {
+  if (i.caller != admin) then throw("Only admin can manage whitelist")
+  else {
+    [
+      DeleteEntry("kyc_" + userAddress)
+    ]
+  }
+}

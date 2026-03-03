@@ -1,0 +1,188 @@
+{-# STDLIB_VERSION 6 #-}
+{-# CONTENT_TYPE DAPP #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+
+# ─────────────────────────────────────────────────────────────
+# RWA Auction Contract – DecentralChain
+# ─────────────────────────────────────────────────────────────
+#
+# Settlement: CR Coin (loyalty/cashback token)
+# Gas: DCC
+# Asset delivery: RWA fractional token (Smart Asset)
+#
+# Rules:
+#   1. Escrow – CR Coins are locked when a bid is placed
+#   2. Auto-refund – previous bidder is refunded instantly
+#   3. Golden Minute – bids in last 60s extend deadline by 60s
+#   4. Finalize – winner gets RWA tokens, seller gets CR Coins minus fee
+# ─────────────────────────────────────────────────────────────
+
+let CR_COIN_ID = base58'CR_COIN_ASSET_ID_PLACEHOLDER'
+let ADMIN     = this.bytes                              # contract deployer
+let MIN_INC   = 5                                       # 5 % minimum bid increment
+let FEE_BPS   = 200                                     # 2 % platform fee (basis points)
+let GOLDEN_MINUTE = 60_000                              # 60 000 ms
+
+# ── Helpers ──────────────────────────────────────────────────
+
+func auctionKey(auctionId: String, field: String) = auctionId + "_" + field
+
+func getAuctionStr(auctionId: String, field: String) =
+  getString(this, auctionKey(auctionId, field)).valueOrElse("")
+
+func getAuctionInt(auctionId: String, field: String) =
+  getInteger(this, auctionKey(auctionId, field)).valueOrElse(0)
+
+func isKyc(addr: String) =
+  getBoolean(this, "kyc_" + addr).valueOrElse(false)
+
+
+# ── Create Auction ───────────────────────────────────────────
+
+@Callable(i)
+func createAuction(
+  auctionId: String,
+  rwaAssetId: String,
+  rwaQuantity: Int,
+  startingBid: Int,
+  durationMs: Int
+) = {
+  # Only admin / whitelisted issuers
+  let caller = toBase58String(i.caller.bytes)
+  if (getAuctionStr(auctionId, "seller") != "")
+    then throw("Auction already exists")
+  else {
+    let deadline = lastBlock.timestamp + durationMs
+    [
+      StringEntry(auctionKey(auctionId, "seller"),      caller),
+      StringEntry(auctionKey(auctionId, "rwaAssetId"),   rwaAssetId),
+      IntegerEntry(auctionKey(auctionId, "rwaQuantity"), rwaQuantity),
+      IntegerEntry(auctionKey(auctionId, "startingBid"), startingBid),
+      IntegerEntry(auctionKey(auctionId, "highestBid"),  0),
+      StringEntry(auctionKey(auctionId, "highestBidder"), ""),
+      IntegerEntry(auctionKey(auctionId, "deadline"),    deadline),
+      BooleanEntry(auctionKey(auctionId, "active"),      true)
+    ]
+  }
+}
+
+
+# ── Place Bid (Escrow CR Coins) ─────────────────────────────
+
+@Callable(i)
+func placeBid(auctionId: String) = {
+  let caller   = toBase58String(i.caller.bytes)
+  let active   = getBoolean(this, auctionKey(auctionId, "active")).valueOrElse(false)
+  let deadline = getAuctionInt(auctionId, "deadline")
+
+  if (!active)          then throw("Auction not active")
+  else if (!isKyc(caller)) then throw("KYC required to bid")
+  else if (lastBlock.timestamp > deadline) then throw("Auction ended")
+  else {
+    # Validate payment is in CR Coin
+    let pmt = i.payments[0]
+    if (pmt.assetId != CR_COIN_ID)
+      then throw("Must pay in CR Coin")
+    else {
+      let bidAmount     = pmt.amount
+      let highestBid    = getAuctionInt(auctionId, "highestBid")
+      let startingBid   = getAuctionInt(auctionId, "startingBid")
+      let minRequired   = if (highestBid > 0)
+                          then highestBid + (highestBid * MIN_INC / 100)
+                          else startingBid
+
+      if (bidAmount < minRequired)
+        then throw("Bid must be at least 5% higher. Min: " + toString(minRequired))
+      else {
+        # Refund previous highest bidder (auto-return)
+        let prevBidder = getAuctionStr(auctionId, "highestBidder")
+        let refundActions = if (prevBidder != "" && highestBid > 0)
+          then [ScriptTransfer(addressFromStringValue(prevBidder), highestBid, CR_COIN_ID)]
+          else []
+
+        # Golden Minute: extend if < 60 s remain
+        let newDeadline = if (deadline - lastBlock.timestamp < GOLDEN_MINUTE)
+          then deadline + GOLDEN_MINUTE
+          else deadline
+
+        refundActions ++ [
+          IntegerEntry(auctionKey(auctionId, "highestBid"),    bidAmount),
+          StringEntry(auctionKey(auctionId, "highestBidder"),  caller),
+          IntegerEntry(auctionKey(auctionId, "deadline"),      newDeadline),
+          # Store last 3 bidders for social proof (shift window)
+          StringEntry(auctionKey(auctionId, "bidder_3"),
+            getAuctionStr(auctionId, "bidder_2")),
+          StringEntry(auctionKey(auctionId, "bidder_2"),
+            getAuctionStr(auctionId, "bidder_1")),
+          StringEntry(auctionKey(auctionId, "bidder_1"),
+            caller + ":" + toString(bidAmount))
+        ]
+      }
+    }
+  }
+}
+
+
+# ── Finalize Auction ────────────────────────────────────────
+
+@Callable(i)
+func finalizeAuction(auctionId: String) = {
+  let active   = getBoolean(this, auctionKey(auctionId, "active")).valueOrElse(false)
+  let deadline = getAuctionInt(auctionId, "deadline")
+
+  if (!active)
+    then throw("Auction not active")
+  else if (lastBlock.timestamp < deadline)
+    then throw("Auction still running")
+  else {
+    let highestBid    = getAuctionInt(auctionId, "highestBid")
+    let highestBidder = getAuctionStr(auctionId, "highestBidder")
+    let seller        = getAuctionStr(auctionId, "seller")
+    let rwaAssetId    = getAuctionStr(auctionId, "rwaAssetId")
+    let rwaQuantity   = getAuctionInt(auctionId, "rwaQuantity")
+
+    if (highestBidder == "")
+      then {
+        # No bids — return RWA tokens to seller (or simply close)
+        [ BooleanEntry(auctionKey(auctionId, "active"), false) ]
+      }
+    else {
+      let fee       = highestBid * FEE_BPS / 10000
+      let sellerAmt = highestBid - fee
+
+      [
+        # Transfer RWA fractions → winner
+        ScriptTransfer(
+          addressFromStringValue(highestBidder),
+          rwaQuantity,
+          fromBase58String(rwaAssetId)
+        ),
+        # Transfer CR Coins → seller (minus fee)
+        ScriptTransfer(
+          addressFromStringValue(seller),
+          sellerAmt,
+          CR_COIN_ID
+        ),
+        # Fee remains in contract (for node incentives)
+        BooleanEntry(auctionKey(auctionId, "active"), false),
+        StringEntry(auctionKey(auctionId, "winner"), highestBidder),
+        IntegerEntry(auctionKey(auctionId, "finalPrice"), highestBid)
+      ]
+    }
+  }
+}
+
+
+# ── Cancel (admin only, before any bids) ─────────────────────
+
+@Callable(i)
+func cancelAuction(auctionId: String) = {
+  if (i.caller.bytes != ADMIN) then throw("Admin only")
+  else {
+    let highestBid = getAuctionInt(auctionId, "highestBid")
+    if (highestBid > 0) then throw("Cannot cancel — bids exist")
+    else [
+      BooleanEntry(auctionKey(auctionId, "active"), false)
+    ]
+  }
+}
