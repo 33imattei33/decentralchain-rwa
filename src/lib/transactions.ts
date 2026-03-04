@@ -1,12 +1,18 @@
-import axios from "axios";
 import {
-  DC_NODE_URL,
   CRS_ASSET_ID,
   DCC_ASSET_ID,
   MARKETPLACE_DAPP,
   FEE_BPS,
+  DC_CHAIN_ID_BYTE,
 } from "@/lib/constants";
+import {
+  broadcastTransaction as broadcastToNode,
+  getTransactionInfo,
+} from "@/lib/nodeApi";
 import type { TransactionReceipt } from "@/types/rwa";
+
+/** Re-export for direct node broadcast (sign externally, then broadcast) */
+export { broadcastToNode };
 
 /**
  * Build, sign, and broadcast an InvokeScript transaction that:
@@ -46,7 +52,7 @@ export async function buyFractionalTokens(params: {
     ],
     fee: 500_000, // 0.005 DCC standard invoke fee
     feeAssetId: DCC_ASSET_ID,
-    chainId: 68, // DecentralChain mainnet chain ID ('D')
+    chainId: DC_CHAIN_ID_BYTE, // DCC mainnet '?' = 63
     timestamp: Date.now(),
   };
 
@@ -80,16 +86,14 @@ export async function waitForConfirmation(
 
   while (Date.now() < deadline) {
     try {
-      const { data } = await axios.get(
-        `${DC_NODE_URL}/transactions/info/${txId}`
-      );
+      const txInfo = await getTransactionInfo(txId);
 
-      if (data.height) {
+      if (txInfo.height) {
         return {
           transactionId: txId,
           status: "confirmed",
-          blockHeight: data.height,
-          timestamp: new Date(data.timestamp).toISOString(),
+          blockHeight: txInfo.height,
+          timestamp: new Date(txInfo.timestamp).toISOString(),
         };
       }
     } catch {

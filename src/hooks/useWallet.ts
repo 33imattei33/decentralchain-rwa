@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import axios from "axios";
-import { DC_NODE_URL, DCC_ASSET_ID, CRS_ASSET_ID, CR_COIN_ASSET_ID } from "@/lib/constants";
+import {
+  getDccBalance,
+  getAllAssetBalances,
+  isNodeReachable,
+} from "@/lib/nodeApi";
+import { CRS_ASSET_ID, CR_COIN_ASSET_ID } from "@/lib/constants";
 import type { WalletBalances } from "@/types/rwa";
 
 declare global {
@@ -25,25 +29,36 @@ export function useWallet() {
   });
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nodeOnline, setNodeOnline] = useState<boolean | null>(null);
 
-  /** Fetch token balances from the node API */
+  /** Fetch token balances from the local DCC node */
   const fetchBalances = useCallback(async (addr: string) => {
     try {
-      const { data } = await axios.get<
-        { assetId: string; balance: number }[]
-      >(`${DC_NODE_URL}/assets/balance/${addr}`);
+      // Native DCC balance (like WAVES balance — not an issued asset)
+      const nativeBalance = await getDccBalance(addr);
 
+      // All issued-asset balances
+      const assetBalances = await getAllAssetBalances(addr);
       const find = (id: string) =>
-        data.find((b) => b.assetId === id)?.balance ?? 0;
+        assetBalances.find((b) => b.assetId === id)?.balance ?? 0;
 
       setBalances({
-        dcc: find(DCC_ASSET_ID),
+        dcc: nativeBalance,
         crs: find(CRS_ASSET_ID),
         crCoin: find(CR_COIN_ASSET_ID),
       });
+      setNodeOnline(true);
     } catch {
       console.warn("Could not fetch balances; node may be unreachable.");
+      setNodeOnline(false);
     }
+  }, []);
+
+  /** Check if the node is reachable */
+  const checkNode = useCallback(async () => {
+    const online = await isNodeReachable();
+    setNodeOnline(online);
+    return online;
   }, []);
 
   /** Connect via DecentralChain Keeper browser extension */
@@ -87,8 +102,10 @@ export function useWallet() {
     balances,
     isConnecting,
     error,
+    nodeOnline,
     connect,
     disconnect,
+    checkNode,
     refreshBalances: () => address && fetchBalances(address),
   } as const;
 }

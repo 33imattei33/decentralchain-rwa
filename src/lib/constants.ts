@@ -1,20 +1,27 @@
 /** DecentralChain node & token configuration */
 
 export const DC_NODE_URL =
-  process.env.NEXT_PUBLIC_DC_NODE_URL ?? "https://nodes.decentralchain.io";
+  process.env.NEXT_PUBLIC_DC_NODE_URL ?? "http://localhost:16879";
 
 export const DC_API_URL =
-  process.env.NEXT_PUBLIC_DC_API_URL ?? "https://api.decentralchain.io/v0";
+  process.env.NEXT_PUBLIC_DC_API_URL ?? "http://localhost:16879";
+
+/** Chain ID character for transaction signing (DCC mainnet = '?' / 0x3F = 63) */
+export const DC_CHAIN_ID = process.env.NEXT_PUBLIC_DC_CHAIN_ID ?? "?";
+export const DC_CHAIN_ID_BYTE = DC_CHAIN_ID.charCodeAt(0); // 63
+
+/** Node API key for admin / debug endpoints (server-side only) */
+export const DC_API_KEY = process.env.DC_API_KEY ?? "";
 
 /** Well-known asset IDs (replace with mainnet values) */
 export const DCC_ASSET_ID =
-  process.env.NEXT_PUBLIC_DCC_ASSET_ID ?? "DCC_ASSET_ID_PLACEHOLDER";
+  process.env.NEXT_PUBLIC_DCC_ASSET_ID ?? "DCC";
 
 export const CRS_ASSET_ID =
-  process.env.NEXT_PUBLIC_CRS_ASSET_ID ?? "CRS_ASSET_ID_PLACEHOLDER";
+  process.env.NEXT_PUBLIC_CRS_ASSET_ID ?? "CRS";
 
 export const CR_COIN_ASSET_ID =
-  process.env.NEXT_PUBLIC_CR_COIN_ASSET_ID ?? "CR_COIN_ASSET_ID_PLACEHOLDER";
+  process.env.NEXT_PUBLIC_CR_COIN_ASSET_ID ?? "CR_COIN";
 
 /** Marketplace dApp address */
 export const MARKETPLACE_DAPP =
