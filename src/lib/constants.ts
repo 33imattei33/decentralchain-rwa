@@ -1,10 +1,10 @@
 /** DecentralChain node & token configuration */
 
 export const DC_NODE_URL =
-  process.env.NEXT_PUBLIC_DC_NODE_URL ?? "http://localhost:16879";
+  process.env.NEXT_PUBLIC_DC_NODE_URL ?? "https://mainnet-node.decentralchain.io";
 
 export const DC_API_URL =
-  process.env.NEXT_PUBLIC_DC_API_URL ?? "http://localhost:16879";
+  process.env.NEXT_PUBLIC_DC_API_URL ?? "https://mainnet-node.decentralchain.io";
 
 /** Chain ID character for transaction signing (DCC mainnet = '?' / 0x3F = 63) */
 export const DC_CHAIN_ID = process.env.NEXT_PUBLIC_DC_CHAIN_ID ?? "?";

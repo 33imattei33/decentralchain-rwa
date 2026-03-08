@@ -65,7 +65,7 @@ export default function NodeStatusBadge({ className = "" }: { className?: string
 
       {!online && !loading && (
         <p className="text-[10px] text-gray-500">
-          Cannot reach localhost:16879
+          Cannot reach mainnet node
         </p>
       )}
     </div>

@@ -4,7 +4,7 @@
  * Built on top of {@link @decentralchain/node-api-js} — the official
  * DecentralChain SDK for interacting with the node REST API.
  *
- * API docs: http://localhost:16879/api-docs/index.html
+ * API docs: https://mainnet-node.decentralchain.io/api-docs/index.html
  */
 
 import { create } from "@decentralchain/node-api-js";
