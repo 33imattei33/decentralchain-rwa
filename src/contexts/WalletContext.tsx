@@ -3,13 +3,14 @@
 /**
  * WalletContext — global wallet connection state for the entire dashboard.
  *
- * Supports ALL DecentralChain Signer-compatible wallets:
- *   1. Cubensis Extension — @decentralchain/provider-cubensis
- *   2. DecentralChain Keeper — legacy window.DecentralChain extension API
- *   3. Seed Phrase — server-side address derivation via ts-lib-crypto
- *   4. Ledger Hardware Wallet — @decentralchain/ledger (WebUSB)
- *   5. Custom Signer Provider — any Provider implementing the Signer interface
- *   6. Manual Address — paste address for read-only access
+ * Supports DecentralChain wallets in priority order:
+ *   1. DecentralChain Wallet — window.decentralchain (Chrome MV3 extension + dApp signer)
+ *   2. Cubensis Extension — @decentralchain/provider-cubensis
+ *   3. DecentralChain Keeper — legacy window.DecentralChain extension API
+ *   4. Seed Phrase — server-side address derivation via ts-lib-crypto
+ *   5. Ledger Hardware Wallet — @decentralchain/ledger (WebUSB)
+ *   6. Custom Signer Provider — any Provider implementing the Signer interface
+ *   7. Manual Address — paste address for read-only access
  *
  * The connected address is persisted in localStorage so it survives page reloads.
  */
@@ -20,6 +21,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import { Signer } from "@decentralchain/signer";
@@ -27,6 +29,8 @@ import { ProviderCubensis } from "@decentralchain/provider-cubensis";
 import { DC_NODE_URL } from "@/lib/constants";
 
 /* ─── Extension install / info links ─── */
+export const DCW_INSTALL_URL =
+  "https://github.com/33imattei33/DecentralChainWallet";
 export const CUBENSIS_INSTALL_URL =
   "https://github.com/Decentral-America/CubensisConnect";
 export const KEEPER_INSTALL_URL =
@@ -34,6 +38,7 @@ export const KEEPER_INSTALL_URL =
 
 /* ─── Types ─── */
 export type ConnectionMethod =
+  | "dcw"       // DecentralChainWallet extension (primary)
   | "cubensis"
   | "keeper"
   | "seed"
@@ -44,6 +49,7 @@ export type ConnectionMethod =
 
 /** Human-readable labels for each method */
 export const CONNECTION_LABELS: Record<Exclude<ConnectionMethod, null>, string> = {
+  dcw: "DCC Wallet",
   cubensis: "Cubensis Extension",
   keeper: "DCC Keeper",
   seed: "Seed Phrase",
@@ -52,8 +58,31 @@ export const CONNECTION_LABELS: Record<Exclude<ConnectionMethod, null>, string> 
   custom: "Custom Provider",
 };
 
+/* ─── DecentralChainWallet provider type (window.decentralchain) ─── */
+export interface DCWProvider {
+  isDecentralChain: boolean;
+  isConnected: boolean;
+  connect(): Promise<{ address: string; publicKey: string }>;
+  disconnect(): Promise<void>;
+  getAccount(): Promise<{ address: string; publicKey: string }>;
+  getNetwork(): Promise<{ chainId: string; nodeUrl: string }>;
+  getBalances(): Promise<unknown[]>;
+  signTransaction(tx: unknown): Promise<unknown>;
+  signAndBroadcast(tx: unknown): Promise<unknown>;
+  signMessage(message: string): Promise<{ signature: string; publicKey: string }>;
+  broadcast(signedTx: unknown): Promise<unknown>;
+  on(event: string, handler: (...args: unknown[]) => void): void;
+  off(event: string, handler: (...args: unknown[]) => void): void;
+  removeAllListeners(event?: string): void;
+}
+
 declare global {
   interface Window {
+    /** DecentralChainWallet extension (primary) */
+    decentralchain?: DCWProvider;
+    /** Convenience alias */
+    dcc?: DCWProvider;
+    /** Legacy Keeper extension */
     DecentralChain?: {
       auth: (data: { data: string }) => Promise<{ address: string; publicKey: string }>;
       signAndPublishTransaction: (tx: string) => Promise<string>;
@@ -69,11 +98,18 @@ interface WalletState {
   error: string | null;
   signer: Signer | null;
 
+  /** The raw DCW provider (window.decentralchain) when connected via DCW */
+  dcwProvider: DCWProvider | null;
+
+  /** Whether the DecentralChainWallet extension is detected */
+  hasDCW: boolean;
   /** Whether the Cubensis extension is detected in the browser */
   hasCubensis: boolean;
   /** Whether the DCC Keeper extension is detected in the browser */
   hasKeeper: boolean;
 
+  /** Connect via DecentralChainWallet browser extension (recommended) */
+  connectDCW: () => Promise<void>;
   /** Connect via Cubensis browser extension (ProviderCubensis) */
   connectCubensis: () => Promise<void>;
   /** Connect via DecentralChain Keeper legacy extension */
@@ -101,15 +137,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<Signer | null>(null);
+  const [dcwProviderState, setDcwProviderState] = useState<DCWProvider | null>(null);
 
   /* ── Extension detection ── */
+  const [hasDCW, setHasDCW] = useState(false);
   const [hasCubensis, setHasCubensis] = useState(false);
   const [hasKeeper, setHasKeeper] = useState(false);
 
-  // Detect browser extensions on mount (with a small delay for late-injecting extensions)
+  // Ref to track DCW event handlers for cleanup
+  const dcwHandlersRef = useRef<{
+    onAccountChanged?: (data: unknown) => void;
+    onDisconnect?: () => void;
+  }>({});
+
+  // Detect browser extensions on mount (with polling + event for late-injecting)
   useEffect(() => {
     const detect = () => {
       if (typeof window !== "undefined") {
+        setHasDCW(!!window.decentralchain?.isDecentralChain);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         setHasCubensis(!!(window as any).CubensisConnect);
         setHasKeeper(!!window.DecentralChain);
@@ -117,10 +162,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
     // Check immediately
     detect();
+    // Listen for DCW injection event
+    const onDCWInit = () => { setHasDCW(true); detect(); };
+    window.addEventListener("decentralchain#initialized", onDCWInit);
     // Re-check after 1s and 3s (extensions may inject late)
     const t1 = setTimeout(detect, 1000);
     const t2 = setTimeout(detect, 3000);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener("decentralchain#initialized", onDCWInit);
+    };
   }, []);
 
   // Restore saved address on mount
@@ -165,7 +217,78 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
-  /* ── 1. Cubensis Extension ── */
+  /* ── 1. DecentralChainWallet Extension (PRIMARY) ── */
+  const connectDCW = useCallback(async () => {
+    setError(null);
+    setIsConnecting(true);
+    try {
+      // Wait up to 3s for the extension to inject
+      let attempts = 0;
+      while (
+        (typeof window === "undefined" || !window.decentralchain?.isDecentralChain) &&
+        attempts < 15
+      ) {
+        await new Promise((r) => setTimeout(r, 200));
+        attempts++;
+      }
+
+      const provider = window.decentralchain;
+      if (!provider?.isDecentralChain) {
+        setHasDCW(false);
+        throw new Error(
+          `DecentralChain Wallet extension not detected. ` +
+            `Install it from ${DCW_INSTALL_URL} then reload the page. ` +
+            `Alternatively, use the Seed Phrase or Wallet Address option to connect.`,
+        );
+      }
+
+      setHasDCW(true);
+      const result = await provider.connect();
+      setAddress(result.address);
+      setPublicKey(result.publicKey);
+      setConnectionMethod("dcw");
+      setDcwProviderState(provider);
+      setSigner(null); // DCW uses its own signing API
+      persist(result.address, "dcw");
+
+      // Listen for account changes and disconnects
+      const onAccountChanged = (data: unknown) => {
+        const d = data as { address?: string; publicKey?: string };
+        if (d?.address) {
+          setAddress(d.address);
+          setPublicKey(d.publicKey ?? null);
+          persist(d.address, "dcw");
+        }
+      };
+      const onDisconnect = () => {
+        setAddress(null);
+        setPublicKey(null);
+        setConnectionMethod(null);
+        setDcwProviderState(null);
+        persist(null, null);
+      };
+
+      // Clean up previous listeners
+      if (dcwHandlersRef.current.onAccountChanged) {
+        provider.off("accountChanged", dcwHandlersRef.current.onAccountChanged);
+      }
+      if (dcwHandlersRef.current.onDisconnect) {
+        provider.off("disconnect", dcwHandlersRef.current.onDisconnect);
+      }
+
+      provider.on("accountChanged", onAccountChanged);
+      provider.on("disconnect", onDisconnect);
+      dcwHandlersRef.current = { onAccountChanged, onDisconnect };
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "DecentralChain Wallet connection failed";
+      setError(msg);
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [persist]);
+
+  /* ── 2. Cubensis Extension ── */
   const connectCubensis = useCallback(async () => {
     setError(null);
     setIsConnecting(true);
@@ -197,7 +320,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [signerLogin]);
 
-  /* ── 2. DecentralChain Keeper (legacy extension) ── */
+  /* ── 3. DecentralChain Keeper (legacy extension) ── */
   const connectKeeper = useCallback(async () => {
     setError(null);
     setIsConnecting(true);
@@ -240,7 +363,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [persist]);
 
-  /* ── 3. Seed Phrase ── */
+  /* ── 4. Seed Phrase ── */
   const connectSeed = useCallback(
     async (seed: string) => {
       setError(null);
@@ -279,7 +402,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
-  /* ── 4. Manual Address (read-only) ── */
+  /* ── 5. Manual Address (read-only) ── */
   const connectAddress = useCallback(
     async (addr: string) => {
       setError(null);
@@ -314,7 +437,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
-  /* ── 5. Custom Signer Provider ── */
+  /* ── 6. Custom Signer Provider ── */
   const connectWithProvider = useCallback(
     async (provider: unknown, _label?: string) => {
       setError(null);
@@ -333,7 +456,23 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   );
 
   /** Disconnect */
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
+    // If connected via DCW, call provider.disconnect()
+    if (dcwProviderState) {
+      try {
+        await dcwProviderState.disconnect();
+      } catch {
+        // ignore
+      }
+      // Clean up event listeners
+      if (dcwHandlersRef.current.onAccountChanged) {
+        dcwProviderState.off("accountChanged", dcwHandlersRef.current.onAccountChanged);
+      }
+      if (dcwHandlersRef.current.onDisconnect) {
+        dcwProviderState.off("disconnect", dcwHandlersRef.current.onDisconnect);
+      }
+      dcwHandlersRef.current = {};
+    }
     if (signer) {
       try {
         signer.logout();
@@ -345,9 +484,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setPublicKey(null);
     setConnectionMethod(null);
     setSigner(null);
+    setDcwProviderState(null);
     setError(null);
     persist(null, null);
-  }, [signer, persist]);
+  }, [signer, dcwProviderState, persist]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -360,8 +500,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         error,
         signer,
+        dcwProvider: dcwProviderState,
+        hasDCW,
         hasCubensis,
         hasKeeper,
+        connectDCW,
         connectCubensis,
         connectKeeper,
         connectSeed,

@@ -202,8 +202,10 @@ function WalletButton() {
     connectionMethod,
     isConnecting,
     error,
+    hasDCW,
     hasCubensis,
     hasKeeper,
+    connectDCW,
     connectCubensis,
     connectKeeper,
     connectSeed,
@@ -259,6 +261,7 @@ function WalletButton() {
 
   const methodLabel = connectionMethod
     ? ({
+        dcw: "DCC Wallet",
         cubensis: "Cubensis",
         keeper: "Keeper",
         seed: "Seed",
@@ -387,8 +390,32 @@ function WalletButton() {
 
           <div className="p-3">
             <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
-              Connect with DecentralChain Signer
+              Connect with DecentralChain Wallet
             </p>
+
+            {/* ── DecentralChainWallet Extension (PRIMARY) ── */}
+            <WalletOption
+              icon={<Wallet size={20} className="text-cyan-400" />}
+              iconBg="bg-cyan-500/20"
+              title="DCC Wallet"
+              description={
+                hasDCW
+                  ? "DecentralChain Wallet extension"
+                  : "Extension not detected — click to try"
+              }
+              badge={hasDCW ? "Detected" : "Recommended"}
+              badgeColor={hasDCW ? "green" : "gray"}
+              onClick={async () => {
+                await connectDCW();
+                setMenuOpen(false);
+              }}
+            />
+
+            <div className="my-3 flex items-center gap-3">
+              <div className="h-px flex-1 bg-gray-700/50" />
+              <span className="text-xs text-gray-600">other wallets</span>
+              <div className="h-px flex-1 bg-gray-700/50" />
+            </div>
 
             {/* ── Cubensis Extension ── */}
             <WalletOption
@@ -397,8 +424,8 @@ function WalletButton() {
               title="Cubensis Wallet"
               description={
                 hasCubensis
-                  ? "Browser extension (recommended)"
-                  : "Extension not detected — click to try anyway"
+                  ? "Cubensis browser extension"
+                  : "Extension not detected"
               }
               badge={hasCubensis ? "Detected" : undefined}
               badgeColor={hasCubensis ? "green" : undefined}
@@ -416,7 +443,7 @@ function WalletButton() {
               description={
                 hasKeeper
                   ? "DecentralChain Keeper extension"
-                  : "Extension not detected — click to try anyway"
+                  : "Extension not detected"
               }
               badge={hasKeeper ? "Detected" : undefined}
               badgeColor={hasKeeper ? "green" : undefined}
