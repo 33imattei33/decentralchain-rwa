@@ -20,7 +20,20 @@ import {
   Loader2,
   ExternalLink,
   Sparkles,
+  Key,
+  Radio,
+  Copy,
+  Check,
 } from "lucide-react";
+import toast from "react-hot-toast";
+import {
+  mintRwaToken,
+  type MintResult,
+  type MintStep,
+} from "@/lib/mintService";
+import { useWallet } from "@/hooks/useWallet";
+import { isNodeReachable } from "@/lib/nodeApi";
+import { DC_NODE_URL } from "@/lib/constants";
 
 /* ── RWA categories ── */
 const CATEGORIES = [
@@ -55,6 +68,7 @@ interface MintForm {
   kycRequired: boolean;
   accreditedOnly: boolean;
   acceptTerms: boolean;
+  seed: string;
 }
 
 const INITIAL_FORM: MintForm = {
@@ -71,6 +85,7 @@ const INITIAL_FORM: MintForm = {
   kycRequired: true,
   accreditedOnly: false,
   acceptTerms: false,
+  seed: "",
 };
 
 /* ── Helpers ── */
@@ -82,6 +97,13 @@ export default function MintPage() {
   const [form, setForm] = useState<MintForm>(INITIAL_FORM);
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState(false);
+  const [mintResult, setMintResult] = useState<MintResult | null>(null);
+  const [mintStep, setMintStep] = useState<MintStep | null>(null);
+  const [mintDetail, setMintDetail] = useState<string>("");
+  const [nodeOnline, setNodeOnline] = useState<boolean | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const { address, publicKey, connect, isConnecting } = useWallet();
 
   const set = useCallback(
     <K extends keyof MintForm>(key: K, value: MintForm[K]) =>
@@ -97,6 +119,13 @@ export default function MintPage() {
   const yieldAPY = parseFloat(form.yieldAPY) || 0;
   const platformFee = valuation * 0.02;
 
+  /* Check node on step 4 */
+  const checkNodeStatus = useCallback(async () => {
+    const online = await isNodeReachable();
+    setNodeOnline(online);
+    return online;
+  }, []);
+
   const canProceed = (): boolean => {
     switch (step) {
       case 1:
@@ -110,12 +139,62 @@ export default function MintPage() {
     }
   };
 
+  /** Copy text to clipboard with visual feedback */
+  const copyToClipboard = async (text: string, label: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  /** Real on-chain minting via @decentralchain/transactions SDK */
   const handleMint = async () => {
     setMinting(true);
-    // Simulate on-chain tx
-    await new Promise((r) => setTimeout(r, 2500));
-    setMinting(false);
-    setMinted(true);
+    setMintStep(null);
+    setMintDetail("");
+
+    try {
+      // Need either a seed or Keeper + publicKey
+      if (!form.seed && !publicKey) {
+        toast.error("Connect your wallet or enter a seed phrase to sign the transaction.");
+        setMinting(false);
+        return;
+      }
+
+      const result = await mintRwaToken(
+        {
+          name: form.title,
+          description: form.description,
+          totalFractions: fractions,
+          decimals: 0,
+          reissuable: false,
+          kycRequired: form.kycRequired,
+          accreditedOnly: form.accreditedOnly,
+          ipfsHash: form.ipfsHash,
+          category: form.category,
+          location: form.location,
+          totalValuation: valuation,
+          yieldAPY,
+          imageUrl: form.imageUrl || undefined,
+          seed: form.seed || undefined,
+          senderPublicKey: publicKey || undefined,
+        },
+        (stepName, detail) => {
+          setMintStep(stepName);
+          setMintDetail(detail ?? "");
+        },
+      );
+
+      setMintResult(result);
+      setMinted(true);
+      toast.success(`RWA Token minted! Asset ID: ${result.assetId.slice(0, 8)}…`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Minting failed";
+      toast.error(msg);
+      setMintStep("error");
+      setMintDetail(msg);
+    } finally {
+      setMinting(false);
+    }
   };
 
   /* ─────────────── Render ─────────────── */
@@ -462,55 +541,145 @@ export default function MintPage() {
                       {form.description || "No description provided."}
                     </p>
                   </Card>
+
+                  {/* Signing — seed phrase input or wallet connect */}
+                  <Card title="Transaction Signing">
+                    {address ? (
+                      <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                        <CheckCircle2 size={16} className="text-emerald-400" />
+                        <div className="text-xs">
+                          <span className="text-gray-400">Connected: </span>
+                          <span className="font-mono text-emerald-400">{address}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={connect}
+                        disabled={isConnecting}
+                        className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-2.5 text-xs font-medium text-cyan-400 transition hover:bg-cyan-500/10"
+                      >
+                        {isConnecting ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />}
+                        Connect Keeper Wallet
+                      </button>
+                    )}
+
+                    <div className="mt-4">
+                      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+                        <Key size={12} />
+                        Seed Phrase (direct signing)
+                      </label>
+                      <input
+                        type="password"
+                        value={form.seed}
+                        onChange={(e) => set("seed", e.target.value)}
+                        placeholder="Enter 15-word seed phrase for server-side signing…"
+                        className="w-full rounded-xl border border-white/5 bg-gray-900 px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none focus:border-cyan-500/40"
+                      />
+                      <p className="mt-1.5 text-[10px] text-gray-600">
+                        The seed phrase is used locally to sign the Issue transaction via the SDK. It is never sent to any server.
+                      </p>
+                    </div>
+                  </Card>
                 </div>
 
                 {/* Mint action sidebar */}
-                <Card title="On-Chain Actions">
-                  <div className="space-y-3 text-xs text-gray-400">
-                    <ActionStep
-                      n={1}
-                      label="Issue Smart Asset via RIDE v6 script"
-                    />
-                    <ActionStep
-                      n={2}
-                      label="Attach KYC whitelist enforcement"
-                    />
-                    <ActionStep
-                      n={3}
-                      label="Register in marketplace dApp"
-                    />
-                    <ActionStep
-                      n={4}
-                      label="Pin metadata to IPFS reference"
-                    />
-                    <ActionStep
-                      n={5}
-                      label="Open fractions for investment"
-                    />
-                  </div>
+                <div className="space-y-4">
+                  {/* Node status */}
+                  <Card title="Node Status">
+                    <button
+                      onClick={checkNodeStatus}
+                      className="flex w-full items-center gap-2 rounded-xl border border-white/5 px-3 py-2.5 text-xs transition hover:bg-white/5"
+                    >
+                      <Radio size={14} className={nodeOnline === true ? "text-emerald-400" : nodeOnline === false ? "text-red-400" : "text-gray-500"} />
+                      <span className={nodeOnline === true ? "text-emerald-400" : nodeOnline === false ? "text-red-400" : "text-gray-500"}>
+                        {nodeOnline === true
+                          ? "Node online"
+                          : nodeOnline === false
+                            ? "Node offline"
+                            : "Check connection"}
+                      </span>
+                      <span className="ml-auto font-mono text-[10px] text-gray-600">{DC_NODE_URL}</span>
+                    </button>
+                  </Card>
 
-                  <button
-                    onClick={handleMint}
-                    disabled={minting}
-                    className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 py-3 text-sm font-bold text-gray-900 transition hover:brightness-110 disabled:opacity-60"
-                  >
-                    {minting ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin" />
-                        Broadcasting…
-                      </>
-                    ) : (
-                      <>
-                        <Coins size={16} />
-                        Mint RWA Token
-                      </>
+                  <Card title="On-Chain Actions">
+                    <div className="space-y-3 text-xs text-gray-400">
+                      <ActionStep
+                        n={1}
+                        label="Compile RIDE v6 Smart Asset script"
+                        active={mintStep === "compiling"}
+                        done={mintStep !== null && mintStep !== "compiling" && mintStep !== "error"}
+                      />
+                      <ActionStep
+                        n={2}
+                        label="Issue fractional token (Type 3 tx)"
+                        active={mintStep === "issuing"}
+                        done={["confirming", "registering", "writing-metadata", "done"].includes(mintStep ?? "")}
+                      />
+                      <ActionStep
+                        n={3}
+                        label="Wait for block confirmation"
+                        active={mintStep === "confirming"}
+                        done={["registering", "writing-metadata", "done"].includes(mintStep ?? "")}
+                      />
+                      <ActionStep
+                        n={4}
+                        label="Register in marketplace dApp"
+                        active={mintStep === "registering"}
+                        done={["writing-metadata", "done"].includes(mintStep ?? "")}
+                      />
+                      <ActionStep
+                        n={5}
+                        label="Write on-chain metadata"
+                        active={mintStep === "writing-metadata"}
+                        done={mintStep === "done"}
+                      />
+                    </div>
+
+                    {/* Progress detail */}
+                    {minting && mintDetail && (
+                      <div className="mt-3 rounded-lg border border-cyan-500/10 bg-cyan-500/5 p-2.5 text-[11px] text-cyan-300">
+                        {mintDetail}
+                      </div>
                     )}
-                  </button>
 
-                  <p className="mt-3 text-center text-[10px] text-gray-600">
-                    Gas paid in DCC · Settlement in CRS · Cashback in CR Coin
-                  </p>
-                </Card>
+                    {/* Error display */}
+                    {mintStep === "error" && mintDetail && (
+                      <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] text-red-400">
+                        {mintDetail}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleMint}
+                      disabled={minting || (!form.seed && !publicKey)}
+                      className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 py-3 text-sm font-bold text-gray-900 transition hover:brightness-110 disabled:opacity-60"
+                    >
+                      {minting ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Broadcasting…
+                        </>
+                      ) : (
+                        <>
+                          <Coins size={16} />
+                          Mint RWA Token on DCC
+                        </>
+                      )}
+                    </button>
+
+                    {!form.seed && !publicKey && (
+                      <p className="mt-2 flex items-center gap-1 text-center text-[10px] text-amber-400/80">
+                        <AlertTriangle size={10} />
+                        Enter a seed phrase or connect wallet to enable minting
+                      </p>
+                    )}
+
+                    <p className="mt-3 text-center text-[10px] text-gray-600">
+                      Gas: 1 DCC (Issue fee) · Settlement: CRS · Cashback: CR Coin
+                    </p>
+                  </Card>
+                </div>
               </div>
             )}
           </motion.div>
@@ -537,38 +706,83 @@ export default function MintPage() {
               on DecentralChain.
             </p>
             <p className="mb-6 text-xs text-gray-500">
-              RIDE v6 Smart Asset with embedded KYC enforcement
+              {form.kycRequired ? "RIDE v6 Smart Asset with embedded KYC enforcement" : "Standard token without transfer restrictions"}
             </p>
 
             <div className="mb-6 rounded-xl border border-white/5 bg-gray-900/60 p-4 text-left">
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <span className="text-gray-500">Asset ID</span>
-                  <p className="mt-0.5 font-mono text-cyan-400">
-                    3PA...x9Qm
-                  </p>
+                  <button
+                    onClick={() => mintResult && copyToClipboard(mintResult.assetId, "assetId")}
+                    className="mt-0.5 flex items-center gap-1 font-mono text-cyan-400 hover:text-cyan-300 transition"
+                  >
+                    {mintResult
+                      ? `${mintResult.assetId.slice(0, 6)}…${mintResult.assetId.slice(-4)}`
+                      : "—"}
+                    {copied === "assetId" ? <Check size={10} /> : <Copy size={10} />}
+                  </button>
                 </div>
                 <div>
                   <span className="text-gray-500">Tx Hash</span>
-                  <p className="mt-0.5 font-mono text-cyan-400">
-                    7Hk...mW2f
-                  </p>
+                  <button
+                    onClick={() => mintResult && copyToClipboard(mintResult.issueTxId, "txId")}
+                    className="mt-0.5 flex items-center gap-1 font-mono text-cyan-400 hover:text-cyan-300 transition"
+                  >
+                    {mintResult
+                      ? `${mintResult.issueTxId.slice(0, 6)}…${mintResult.issueTxId.slice(-4)}`
+                      : "—"}
+                    {copied === "txId" ? <Check size={10} /> : <Copy size={10} />}
+                  </button>
                 </div>
                 <div>
                   <span className="text-gray-500">Block</span>
-                  <p className="mt-0.5 font-medium text-white">#2,847,293</p>
+                  <p className="mt-0.5 font-medium text-white">
+                    {mintResult?.blockHeight
+                      ? `#${mintResult.blockHeight.toLocaleString()}`
+                      : "Pending…"}
+                  </p>
                 </div>
                 <div>
                   <span className="text-gray-500">Gas Paid</span>
-                  <p className="mt-0.5 font-medium text-white">0.005 DCC</p>
+                  <p className="mt-0.5 font-medium text-white">
+                    {mintResult ? `${(mintResult.feePaid / 1e8).toFixed(3)} DCC` : "—"}
+                  </p>
                 </div>
+                {mintResult?.dataTxId && (
+                  <div className="col-span-2">
+                    <span className="text-gray-500">Metadata Tx</span>
+                    <button
+                      onClick={() => copyToClipboard(mintResult.dataTxId!, "dataTxId")}
+                      className="mt-0.5 flex items-center gap-1 font-mono text-cyan-400 hover:text-cyan-300 transition"
+                    >
+                      {mintResult.dataTxId.slice(0, 10)}…{mintResult.dataTxId.slice(-6)}
+                      {copied === "dataTxId" ? <Check size={10} /> : <Copy size={10} />}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Explorer link */}
+            {mintResult && (
+              <a
+                href={`${DC_NODE_URL}/transactions/info/${mintResult.issueTxId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mb-4 inline-flex items-center gap-1.5 text-xs text-cyan-400 hover:underline"
+              >
+                View on Node API <ExternalLink size={12} />
+              </a>
+            )}
 
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={() => {
                   setMinted(false);
+                  setMintResult(null);
+                  setMintStep(null);
+                  setMintDetail("");
                   setStep(1);
                   setForm(INITIAL_FORM);
                 }}
@@ -754,13 +968,36 @@ function ReviewField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ActionStep({ n, label }: { n: number; label: string }) {
+function ActionStep({
+  n,
+  label,
+  active,
+  done,
+}: {
+  n: number;
+  label: string;
+  active?: boolean;
+  done?: boolean;
+}) {
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-500/10 text-[10px] font-bold text-cyan-400">
-        {n}
+    <div className={`flex items-start gap-3 transition ${active ? "text-white" : done ? "text-emerald-400/80" : "text-gray-500"}`}>
+      <div
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition ${
+          done
+            ? "bg-emerald-500/20 text-emerald-400"
+            : active
+            ? "bg-cyan-500/20 text-cyan-400 animate-pulse"
+            : "bg-cyan-500/10 text-cyan-400/50"
+        }`}
+      >
+        {done ? <Check size={12} /> : n}
       </div>
       <span className="leading-relaxed">{label}</span>
+      {active && (
+        <div className="ml-auto">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+        </div>
+      )}
     </div>
   );
 }
