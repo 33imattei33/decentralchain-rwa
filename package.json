@@ -16,6 +16,8 @@
     "@decentralchain/node-api-js": "^1.2.5-beta.18",
     "@decentralchain/oracle-data": "^1.0.0",
     "@decentralchain/parse-json-bignumber": "^2.0.0",
+    "@decentralchain/provider-cubensis": "^0.2.5",
+    "@decentralchain/provider-seed": "^0.2.0",
     "@decentralchain/signature-adapter": "^6.1.7",
     "@decentralchain/signer": "^1.1.0-beta",
     "@decentralchain/transactions": "^5.0.0",

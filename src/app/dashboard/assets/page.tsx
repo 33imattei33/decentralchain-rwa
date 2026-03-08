@@ -17,7 +17,9 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  Plug,
 } from "lucide-react";
+import { useWalletContext } from "@/contexts/WalletContext";
 
 /* ─── types ─── */
 interface AssetDetail {
@@ -72,6 +74,7 @@ function timeAgo(timestamp: number): string {
    My Assets Component — fetches real on-chain data
    ═════════════════════════════════════════════════════════════════ */
 function MyAssets() {
+  const wallet = useWalletContext();
   const [address, setAddress] = useState("");
   const [submittedAddress, setSubmittedAddress] = useState("");
   const [data, setData] = useState<AssetsResponse | null>(null);
@@ -80,14 +83,24 @@ function MyAssets() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedAsset, setExpandedAsset] = useState<string | null>(null);
 
-  // Auto-load from localStorage on mount
+  // Auto-sync from wallet context
   useEffect(() => {
-    const saved = localStorage.getItem("dcc_wallet_address");
-    if (saved) {
-      setAddress(saved);
-      setSubmittedAddress(saved);
+    if (wallet.address) {
+      setAddress(wallet.address);
+      setSubmittedAddress(wallet.address);
     }
-  }, []);
+  }, [wallet.address]);
+
+  // Fallback: load from localStorage if no wallet connected
+  useEffect(() => {
+    if (!wallet.address) {
+      const saved = localStorage.getItem("dcc_wallet_address");
+      if (saved) {
+        setAddress(saved);
+        setSubmittedAddress(saved);
+      }
+    }
+  }, [wallet.address]);
 
   // Fetch whenever submittedAddress changes
   useEffect(() => {
@@ -494,12 +507,27 @@ function MyAssets() {
         <div className="py-20 text-center">
           <Wallet size={48} className="mx-auto text-gray-600" />
           <p className="mt-4 text-lg text-gray-400">
-            Enter your wallet address to view your on-chain assets
+            Connect your wallet to view your on-chain assets
           </p>
           <p className="mt-2 text-sm text-gray-500">
             Your minted RWA tokens, DCC balance, and smart assets will appear
             here.
           </p>
+          {!wallet.address && (
+            <div className="mx-auto mt-6 flex max-w-sm flex-col gap-3">
+              <button
+                onClick={wallet.connectExtension}
+                disabled={wallet.isConnecting}
+                className="flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:opacity-60"
+              >
+                <Plug size={16} />
+                Connect Cubensis Extension
+              </button>
+              <p className="text-xs text-gray-600">
+                Or enter an address manually above
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

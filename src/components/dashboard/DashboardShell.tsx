@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -18,8 +18,18 @@ import {
   User,
   Home,
   Leaf,
+  Wallet,
+  LogOut,
+  Key,
+  Plug,
+  Copy,
+  Check,
+  ChevronDown,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
 import NodeStatusBadge from "@/components/dashboard/NodeStatusBadge";
+import { useWalletContext } from "@/contexts/WalletContext";
 
 const sidebarLinks = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Overview", exact: true },
@@ -167,14 +177,7 @@ export default function DashboardShell({
               <Bell size={18} />
               <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-cyan-500" />
             </button>
-            <div className="flex items-center gap-2 rounded-xl border border-white/5 px-3 py-1.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/20">
-                <User size={14} className="text-cyan-400" />
-              </div>
-              <span className="hidden text-sm text-gray-300 sm:block">
-                Investor
-              </span>
-            </div>
+            <WalletButton />
           </div>
         </header>
 
@@ -183,6 +186,250 @@ export default function DashboardShell({
           {children}
         </main>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Wallet Connection Button — appears in the top bar
+   ═══════════════════════════════════════════════════════════════ */
+function WalletButton() {
+  const {
+    address,
+    connectionMethod,
+    isConnecting,
+    error,
+    connectExtension,
+    connectSeed,
+    disconnect,
+    clearError,
+  } = useWalletContext();
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showSeedInput, setShowSeedInput] = useState(false);
+  const [seedValue, setSeedValue] = useState("");
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+        setShowSeedInput(false);
+      }
+    }
+    if (menuOpen) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
+
+  const copyAddress = () => {
+    if (address) {
+      navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleSeedConnect = async () => {
+    await connectSeed(seedValue);
+    if (!error) {
+      setSeedValue("");
+      setShowSeedInput(false);
+      setMenuOpen(false);
+    }
+  };
+
+  const truncated = address
+    ? `${address.slice(0, 6)}...${address.slice(-4)}`
+    : null;
+
+  // Connected state
+  if (address) {
+    return (
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          className="flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-sm transition hover:bg-cyan-500/20"
+        >
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-500/30">
+            <Wallet size={12} className="text-cyan-400" />
+          </div>
+          <span className="hidden text-cyan-300 sm:block">{truncated}</span>
+          <ChevronDown
+            size={14}
+            className={`text-cyan-400 transition ${menuOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-gray-700/50 bg-gray-900 shadow-2xl shadow-black/40">
+            {/* Header */}
+            <div className="border-b border-gray-700/50 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Connected Wallet
+                </span>
+                <span className="rounded-full bg-green-500/20 px-2 py-0.5 text-xs text-green-400">
+                  {connectionMethod === "cubensis" ? "Extension" : "Seed"}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-gray-800 px-2 py-1 text-xs text-cyan-300">
+                  {address}
+                </code>
+                <button
+                  onClick={copyAddress}
+                  className="text-gray-500 transition hover:text-cyan-400"
+                >
+                  {copied ? (
+                    <Check size={14} className="text-green-400" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="p-2">
+              <button
+                onClick={() => {
+                  disconnect();
+                  setMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-400 transition hover:bg-gray-800 hover:text-red-400"
+              >
+                <LogOut size={16} />
+                Disconnect Wallet
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Disconnected state
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={() => setMenuOpen(!menuOpen)}
+        disabled={isConnecting}
+        className="flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:opacity-60"
+      >
+        {isConnecting ? (
+          <Loader2 size={14} className="animate-spin" />
+        ) : (
+          <Wallet size={14} />
+        )}
+        <span className="hidden sm:inline">
+          {isConnecting ? "Connecting..." : "Connect Wallet"}
+        </span>
+      </button>
+
+      {menuOpen && !isConnecting && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-gray-700/50 bg-gray-900 shadow-2xl shadow-black/40">
+          {/* Error banner */}
+          {error && (
+            <div className="flex items-start gap-2 border-b border-gray-700/50 bg-red-500/10 p-3">
+              <AlertCircle
+                size={16}
+                className="mt-0.5 shrink-0 text-red-400"
+              />
+              <p className="flex-1 text-xs text-red-300">{error}</p>
+              <button
+                onClick={clearError}
+                className="text-xs text-red-400 hover:text-red-300"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          <div className="p-3">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
+              Choose connection method
+            </p>
+
+            {/* Extension option */}
+            <button
+              onClick={async () => {
+                await connectExtension();
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-3 rounded-lg border border-gray-700/50 bg-gray-800/50 p-3 text-left transition hover:border-cyan-500/30 hover:bg-gray-800"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/20">
+                <Plug size={20} className="text-purple-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Cubensis Extension
+                </p>
+                <p className="text-xs text-gray-500">
+                  Connect via browser extension wallet
+                </p>
+              </div>
+            </button>
+
+            <div className="my-3 flex items-center gap-3">
+              <div className="h-px flex-1 bg-gray-700/50" />
+              <span className="text-xs text-gray-600">or</span>
+              <div className="h-px flex-1 bg-gray-700/50" />
+            </div>
+
+            {/* Seed phrase option */}
+            {!showSeedInput ? (
+              <button
+                onClick={() => setShowSeedInput(true)}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-700/50 bg-gray-800/50 p-3 text-left transition hover:border-cyan-500/30 hover:bg-gray-800"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
+                  <Key size={20} className="text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Seed Phrase
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Enter your 12-word seed phrase
+                  </p>
+                </div>
+              </button>
+            ) : (
+              <div className="space-y-2 rounded-lg border border-gray-700/50 bg-gray-800/50 p-3">
+                <textarea
+                  value={seedValue}
+                  onChange={(e) => setSeedValue(e.target.value)}
+                  placeholder="Enter your 12-word seed phrase..."
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-cyan-500"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setShowSeedInput(false);
+                      setSeedValue("");
+                    }}
+                    className="flex-1 rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSeedConnect}
+                    disabled={!seedValue.trim()}
+                    className="flex-1 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-500 disabled:opacity-50"
+                  >
+                    Connect
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
