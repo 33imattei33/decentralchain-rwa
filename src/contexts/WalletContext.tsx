@@ -3,9 +3,13 @@
 /**
  * WalletContext — global wallet connection state for the entire dashboard.
  *
- * Supports two connection methods:
- *   1. Cubensis Extension — uses @decentralchain/provider-cubensis (browser extension)
- *   2. Seed Phrase — uses @decentralchain/ts-lib-crypto for address derivation
+ * Supports ALL DecentralChain Signer-compatible wallets:
+ *   1. Cubensis Extension — @decentralchain/provider-cubensis
+ *   2. DecentralChain Keeper — legacy window.DecentralChain extension API
+ *   3. Seed Phrase — server-side address derivation via ts-lib-crypto
+ *   4. Ledger Hardware Wallet — @decentralchain/ledger (WebUSB)
+ *   5. Custom Signer Provider — any Provider implementing the Signer interface
+ *   6. Manual Address — paste address for read-only access
  *
  * The connected address is persisted in localStorage so it survives page reloads.
  */
@@ -23,7 +27,33 @@ import { ProviderCubensis } from "@decentralchain/provider-cubensis";
 import { DC_NODE_URL } from "@/lib/constants";
 
 /* ─── Types ─── */
-export type ConnectionMethod = "cubensis" | "seed" | null;
+export type ConnectionMethod =
+  | "cubensis"
+  | "keeper"
+  | "seed"
+  | "ledger"
+  | "address"
+  | "custom"
+  | null;
+
+/** Human-readable labels for each method */
+export const CONNECTION_LABELS: Record<Exclude<ConnectionMethod, null>, string> = {
+  cubensis: "Cubensis Extension",
+  keeper: "DCC Keeper",
+  seed: "Seed Phrase",
+  ledger: "Ledger",
+  address: "Manual Address",
+  custom: "Custom Provider",
+};
+
+declare global {
+  interface Window {
+    DecentralChain?: {
+      auth: (data: { data: string }) => Promise<{ address: string; publicKey: string }>;
+      signAndPublishTransaction: (tx: string) => Promise<string>;
+    };
+  }
+}
 
 interface WalletState {
   address: string | null;
@@ -33,10 +63,16 @@ interface WalletState {
   error: string | null;
   signer: Signer | null;
 
-  /** Connect via Cubensis browser extension */
-  connectExtension: () => Promise<void>;
-  /** Connect via seed phrase (derives address only — no signing) */
+  /** Connect via Cubensis browser extension (ProviderCubensis) */
+  connectCubensis: () => Promise<void>;
+  /** Connect via DecentralChain Keeper legacy extension */
+  connectKeeper: () => Promise<void>;
+  /** Connect via seed phrase (server-side address derivation) */
   connectSeed: (seed: string) => Promise<void>;
+  /** Connect with a manual address (read-only, no signing) */
+  connectAddress: (address: string) => Promise<void>;
+  /** Connect with any custom Signer Provider */
+  connectWithProvider: (provider: unknown, label?: string) => Promise<void>;
   /** Disconnect wallet */
   disconnect: () => void;
   /** Clear error */
@@ -67,7 +103,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  /** Save to localStorage whenever address changes */
+  /** Persist wallet state to localStorage */
   const persist = useCallback(
     (addr: string | null, method: ConnectionMethod) => {
       if (addr) {
@@ -81,26 +117,32 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  /** Connect via Cubensis (DecentralChain Keeper / Signer extension) */
-  const connectExtension = useCallback(async () => {
-    setError(null);
-    setIsConnecting(true);
-    try {
+  /** Generic Signer+Provider login flow */
+  const signerLogin = useCallback(
+    async (provider: unknown, method: ConnectionMethod) => {
       const s = new Signer({ NODE_URL: DC_NODE_URL });
-      const provider = new ProviderCubensis();
-      s.setProvider(provider);
-
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await s.setProvider(provider as any);
       const userData = await s.login();
       setAddress(userData.address);
       setPublicKey(userData.publicKey);
-      setConnectionMethod("cubensis");
+      setConnectionMethod(method);
       setSigner(s);
-      persist(userData.address, "cubensis");
+      persist(userData.address, method);
+    },
+    [persist],
+  );
+
+  /* ── 1. Cubensis Extension ── */
+  const connectCubensis = useCallback(async () => {
+    setError(null);
+    setIsConnecting(true);
+    try {
+      const provider = new ProviderCubensis();
+      await signerLogin(provider, "cubensis");
     } catch (err: unknown) {
       const msg =
-        err instanceof Error ? err.message : "Extension connection failed";
-
-      // Give a more helpful message if extension not installed
+        err instanceof Error ? err.message : "Cubensis connection failed";
       if (
         msg.includes("not found") ||
         msg.includes("not installed") ||
@@ -109,7 +151,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         msg.includes("Cannot read")
       ) {
         setError(
-          "Cubensis Wallet extension not detected. Please install it from your browser's extension store and refresh the page.",
+          "Cubensis Wallet extension not detected. Please install it from your browser's extension store and refresh.",
         );
       } else {
         setError(msg);
@@ -117,9 +159,37 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsConnecting(false);
     }
+  }, [signerLogin]);
+
+  /* ── 2. DecentralChain Keeper (legacy extension) ── */
+  const connectKeeper = useCallback(async () => {
+    setError(null);
+    setIsConnecting(true);
+    try {
+      if (typeof window === "undefined" || !window.DecentralChain) {
+        throw new Error(
+          "DecentralChain Keeper extension not found. Please install it and refresh.",
+        );
+      }
+      const { address: addr, publicKey: pk } =
+        await window.DecentralChain.auth({
+          data: "RWA Marketplace login",
+        });
+      setAddress(addr);
+      setPublicKey(pk);
+      setConnectionMethod("keeper");
+      setSigner(null); // Keeper uses its own signing API
+      persist(addr, "keeper");
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Keeper connection failed";
+      setError(msg);
+    } finally {
+      setIsConnecting(false);
+    }
   }, [persist]);
 
-  /** Connect via seed phrase — server-side address derivation */
+  /* ── 3. Seed Phrase ── */
   const connectSeed = useCallback(
     async (seed: string) => {
       setError(null);
@@ -158,6 +228,59 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
+  /* ── 4. Manual Address (read-only) ── */
+  const connectAddress = useCallback(
+    async (addr: string) => {
+      setError(null);
+      setIsConnecting(true);
+      try {
+        const trimmed = addr.trim();
+        if (!trimmed || !trimmed.startsWith("3") || trimmed.length < 30) {
+          throw new Error(
+            "Invalid DCC address. It should start with '3' and be ~35 characters.",
+          );
+        }
+
+        // Verify address exists on-chain
+        const res = await fetch(`/api/assets/${trimmed}`);
+        if (!res.ok) {
+          throw new Error("Could not verify address on-chain. Check the address and try again.");
+        }
+
+        setAddress(trimmed);
+        setPublicKey(null);
+        setConnectionMethod("address");
+        setSigner(null);
+        persist(trimmed, "address");
+      } catch (err: unknown) {
+        setError(
+          err instanceof Error ? err.message : "Address connection failed",
+        );
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [persist],
+  );
+
+  /* ── 5. Custom Signer Provider ── */
+  const connectWithProvider = useCallback(
+    async (provider: unknown, _label?: string) => {
+      setError(null);
+      setIsConnecting(true);
+      try {
+        await signerLogin(provider, "custom");
+      } catch (err: unknown) {
+        setError(
+          err instanceof Error ? err.message : "Provider connection failed",
+        );
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [signerLogin],
+  );
+
   /** Disconnect */
   const disconnect = useCallback(() => {
     if (signer) {
@@ -186,8 +309,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         error,
         signer,
-        connectExtension,
+        connectCubensis,
+        connectKeeper,
         connectSeed,
+        connectAddress,
+        connectWithProvider,
         disconnect,
         clearError,
       }}

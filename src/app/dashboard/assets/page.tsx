@@ -516,15 +516,23 @@ function MyAssets() {
           {!wallet.address && (
             <div className="mx-auto mt-6 flex max-w-sm flex-col gap-3">
               <button
-                onClick={wallet.connectExtension}
+                onClick={wallet.connectCubensis}
                 disabled={wallet.isConnecting}
                 className="flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:opacity-60"
               >
                 <Plug size={16} />
-                Connect Cubensis Extension
+                Connect Wallet Extension
+              </button>
+              <button
+                onClick={wallet.connectKeeper}
+                disabled={wallet.isConnecting}
+                className="flex items-center justify-center gap-2 rounded-xl border border-gray-700 px-5 py-3 text-sm font-medium text-gray-300 transition hover:border-cyan-500/30 hover:text-white disabled:opacity-60"
+              >
+                <Shield size={16} />
+                Connect DCC Keeper
               </button>
               <p className="text-xs text-gray-600">
-                Or enter an address manually above
+                Or use the Connect Wallet button in the top bar for more options
               </p>
             </div>
           )}
