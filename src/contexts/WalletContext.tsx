@@ -26,6 +26,12 @@ import { Signer } from "@decentralchain/signer";
 import { ProviderCubensis } from "@decentralchain/provider-cubensis";
 import { DC_NODE_URL } from "@/lib/constants";
 
+/* ─── Extension install / info links ─── */
+export const CUBENSIS_INSTALL_URL =
+  "https://github.com/Decentral-America/CubensisConnect";
+export const KEEPER_INSTALL_URL =
+  "https://github.com/Decentral-America/DecentralChainKeeper";
+
 /* ─── Types ─── */
 export type ConnectionMethod =
   | "cubensis"
@@ -63,6 +69,11 @@ interface WalletState {
   error: string | null;
   signer: Signer | null;
 
+  /** Whether the Cubensis extension is detected in the browser */
+  hasCubensis: boolean;
+  /** Whether the DCC Keeper extension is detected in the browser */
+  hasKeeper: boolean;
+
   /** Connect via Cubensis browser extension (ProviderCubensis) */
   connectCubensis: () => Promise<void>;
   /** Connect via DecentralChain Keeper legacy extension */
@@ -90,6 +101,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<Signer | null>(null);
+
+  /* ── Extension detection ── */
+  const [hasCubensis, setHasCubensis] = useState(false);
+  const [hasKeeper, setHasKeeper] = useState(false);
+
+  // Detect browser extensions on mount (with a small delay for late-injecting extensions)
+  useEffect(() => {
+    const detect = () => {
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setHasCubensis(!!(window as any).CubensisConnect);
+        setHasKeeper(!!window.DecentralChain);
+      }
+    };
+    // Check immediately
+    detect();
+    // Re-check after 1s and 3s (extensions may inject late)
+    const t1 = setTimeout(detect, 1000);
+    const t2 = setTimeout(detect, 3000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
 
   // Restore saved address on mount
   useEffect(() => {
@@ -140,6 +172,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     try {
       const provider = new ProviderCubensis();
       await signerLogin(provider, "cubensis");
+      setHasCubensis(true);
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "Cubensis connection failed";
@@ -150,8 +183,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         msg.includes("timeout") ||
         msg.includes("Cannot read")
       ) {
+        setHasCubensis(false);
         setError(
-          "Cubensis Wallet extension not detected. Please install it from your browser's extension store and refresh.",
+          `Cubensis Wallet extension not detected in your browser. ` +
+          `Install it from ${CUBENSIS_INSTALL_URL} then reload the page. ` +
+          `Alternatively, use the Seed Phrase or Wallet Address option to connect.`,
         );
       } else {
         setError(msg);
@@ -166,11 +202,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsConnecting(true);
     try {
+      // Wait up to 2 seconds for the extension to inject
+      let attempts = 0;
+      while (
+        (typeof window === "undefined" || !window.DecentralChain) &&
+        attempts < 10
+      ) {
+        await new Promise((r) => setTimeout(r, 200));
+        attempts++;
+      }
+
       if (typeof window === "undefined" || !window.DecentralChain) {
+        setHasKeeper(false);
         throw new Error(
-          "DecentralChain Keeper extension not found. Please install it and refresh.",
+          `DecentralChain Keeper extension not detected in your browser. ` +
+            `Install it from ${KEEPER_INSTALL_URL} then reload the page. ` +
+            `Alternatively, use the Cubensis Wallet or Seed Phrase option to connect.`,
         );
       }
+
+      setHasKeeper(true);
       const { address: addr, publicKey: pk } =
         await window.DecentralChain.auth({
           data: "RWA Marketplace login",
@@ -309,6 +360,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         error,
         signer,
+        hasCubensis,
+        hasKeeper,
         connectCubensis,
         connectKeeper,
         connectSeed,

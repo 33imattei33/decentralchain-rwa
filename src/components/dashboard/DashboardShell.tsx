@@ -202,6 +202,8 @@ function WalletButton() {
     connectionMethod,
     isConnecting,
     error,
+    hasCubensis,
+    hasKeeper,
     connectCubensis,
     connectKeeper,
     connectSeed,
@@ -356,7 +358,24 @@ function WalletButton() {
                 size={16}
                 className="mt-0.5 shrink-0 text-red-400"
               />
-              <p className="flex-1 text-xs text-red-300">{error}</p>
+              <p className="flex-1 text-xs text-red-300">
+                {/* Render URLs inside the error as clickable links */}
+                {error.split(/(https?:\/\/[^\s]+)/g).map((part, i) =>
+                  part.match(/^https?:\/\//) ? (
+                    <a
+                      key={i}
+                      href={part}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-cyan-400 hover:text-cyan-300"
+                    >
+                      {part}
+                    </a>
+                  ) : (
+                    <span key={i}>{part}</span>
+                  ),
+                )}
+              </p>
               <button
                 onClick={clearError}
                 className="text-xs text-red-400 hover:text-red-300"
@@ -376,7 +395,13 @@ function WalletButton() {
               icon={<Plug size={20} className="text-purple-400" />}
               iconBg="bg-purple-500/20"
               title="Cubensis Wallet"
-              description="Browser extension (recommended)"
+              description={
+                hasCubensis
+                  ? "Browser extension (recommended)"
+                  : "Extension not detected — click to try anyway"
+              }
+              badge={hasCubensis ? "Detected" : undefined}
+              badgeColor={hasCubensis ? "green" : undefined}
               onClick={async () => {
                 await connectCubensis();
                 setMenuOpen(false);
@@ -388,7 +413,13 @@ function WalletButton() {
               icon={<Shield size={20} className="text-cyan-400" />}
               iconBg="bg-cyan-500/20"
               title="DCC Keeper"
-              description="DecentralChain Keeper extension"
+              description={
+                hasKeeper
+                  ? "DecentralChain Keeper extension"
+                  : "Extension not detected — click to try anyway"
+              }
+              badge={hasKeeper ? "Detected" : undefined}
+              badgeColor={hasKeeper ? "green" : undefined}
               onClick={async () => {
                 await connectKeeper();
                 setMenuOpen(false);
@@ -514,6 +545,7 @@ function WalletOption({
   title,
   description,
   badge,
+  badgeColor,
   disabled,
   onClick,
   className = "",
@@ -523,10 +555,15 @@ function WalletOption({
   title: string;
   description: string;
   badge?: string;
+  badgeColor?: "green" | "gray";
   disabled?: boolean;
   onClick: () => void;
   className?: string;
 }) {
+  const badgeCls =
+    badgeColor === "green"
+      ? "bg-green-500/20 text-green-400"
+      : "bg-gray-700 text-gray-400";
   return (
     <button
       onClick={onClick}
@@ -542,7 +579,7 @@ function WalletOption({
         <div className="flex items-center gap-2">
           <p className="text-sm font-semibold text-white">{title}</p>
           {badge && (
-            <span className="rounded-full bg-gray-700 px-1.5 py-0.5 text-[10px] text-gray-400">
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${badgeCls}`}>
               {badge}
             </span>
           )}
