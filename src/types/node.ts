@@ -1,7 +1,50 @@
 /**
- * Type definitions for the DecentralChain (Waves-compatible) Node REST API.
- * These mirror the JSON shapes returned by http://localhost:16879.
+ * Type definitions for the DecentralChain Node REST API.
+ *
+ * Extends / re-exports types from the official @decentralchain/ts-types
+ * package where applicable, and adds custom shapes for endpoints not
+ * covered by the base SDK types.
  */
+
+/* ── SDK re-exports (official transaction & data types) ── */
+export type {
+  // Transaction types
+  Transaction,
+  TransactionFromNode,
+  TransactionType,
+  SignedTransaction,
+  InvokeScriptTransaction,
+  TransferTransaction,
+  DataTransaction,
+  IssueTransaction,
+  MassTransferTransaction,
+  SetScriptTransaction,
+  BurnTransaction,
+  LeaseTransaction,
+  CancelLeaseTransaction,
+  AliasTransaction,
+  ExchangeTransaction,
+
+  // Data entry types
+  DataTransactionEntry,
+  DataTransactionEntryInteger,
+  DataTransactionEntryBoolean,
+  DataTransactionEntryString,
+  DataTransactionEntryBinary,
+
+  // Invoke call types
+  InvokeScriptCall,
+  InvokeScriptCallArgument,
+  InvokeScriptPayment,
+
+  // Misc types
+  Long,
+  WithId,
+  WithApiMixin,
+  WithApplicationStatus,
+  Proofs,
+  TRANSACTION_TYPE,
+} from "@decentralchain/ts-types";
 
 /* ── Node Info ── */
 
@@ -60,7 +103,7 @@ export type DataEntry =
   | { key: string; type: "string"; value: string }
   | { key: string; type: "binary"; value: string };
 
-/* ── Transactions ── */
+/* ── Transactions (local interface for REST responses) ── */
 
 export interface TransactionInfo {
   type: number;

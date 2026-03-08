@@ -1,230 +1,214 @@
 /**
  * DecentralChain Node REST API client.
  *
- * Wraps the Waves-compatible REST API exposed by the DCC node at
- * http://localhost:16879.  All public endpoints mirror the standard
- * Waves node API paths.
+ * Built on top of {@link @decentralchain/node-api-js} — the official
+ * DecentralChain SDK for interacting with the node REST API.
  *
  * API docs: http://localhost:16879/api-docs/index.html
  */
 
-import axios, { type AxiosRequestConfig } from "axios";
+import { create } from "@decentralchain/node-api-js";
 import { DC_NODE_URL, DC_API_KEY } from "@/lib/constants";
 import type {
   NodeStatus,
   NodeVersion,
   BlockHeight,
-  BlockInfo,
   AssetBalance,
   DataEntry,
-  TransactionInfo,
   ScriptInfo,
 } from "@/types/node";
 
 /* ═══════════════════════════════════════════════════════════════
-   Axios instance — points at the local DCC node
+   SDK client — powered by @decentralchain/node-api-js
    ═══════════════════════════════════════════════════════════════ */
 
-const api = axios.create({
-  baseURL: DC_NODE_URL,
-  timeout: 15_000,
-  headers: { Accept: "application/json" },
-});
-
-/** Attach the API key header for admin/debug requests */
-function withApiKey(): AxiosRequestConfig {
-  return { headers: { "X-API-Key": DC_API_KEY } };
-}
+/**
+ * Singleton API instance created via the official SDK `create()` function.
+ * All methods are auto-bound to the configured node URL.
+ */
+export const dccApi = create(DC_NODE_URL);
 
 /* ═══════════════════════════════════════════════════════════════
    Node Info
    ═══════════════════════════════════════════════════════════════ */
 
-/** GET /node/version */
+/** GET /node/version — via SDK */
 export async function getNodeVersion(): Promise<NodeVersion> {
-  const { data } = await api.get<NodeVersion>("/node/version");
-  return data;
+  const data = await dccApi.node.fetchNodeVersion();
+  return data as unknown as NodeVersion;
 }
 
-/** GET /node/status */
+/** GET /node/status — via SDK */
 export async function getNodeStatus(): Promise<NodeStatus> {
-  const { data } = await api.get<NodeStatus>("/node/status");
-  return data;
+  const data = await dccApi.node.fetchNodeStatus();
+  return data as unknown as NodeStatus;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    Blocks
    ═══════════════════════════════════════════════════════════════ */
 
-/** GET /blocks/height */
+/** GET /blocks/height — via SDK */
 export async function getBlockHeight(): Promise<number> {
-  const { data } = await api.get<BlockHeight>("/blocks/height");
+  const data = (await dccApi.blocks.fetchHeight()) as unknown as BlockHeight;
   return data.height;
 }
 
-/** GET /blocks/last */
-export async function getLastBlock(): Promise<BlockInfo> {
-  const { data } = await api.get<BlockInfo>("/blocks/last");
-  return data;
+/** GET /blocks/last — via SDK */
+export async function getLastBlock() {
+  return dccApi.blocks.fetchHeadersLast();
 }
 
 /** GET /blocks/at/{height} */
-export async function getBlockAt(height: number): Promise<BlockInfo> {
-  const { data } = await api.get<BlockInfo>(`/blocks/at/${height}`);
-  return data;
+export async function getBlockAt(height: number) {
+  return dccApi.blocks.fetchHeadersAt(height);
 }
 
 /* ═══════════════════════════════════════════════════════════════
    Addresses & Balances
    ═══════════════════════════════════════════════════════════════ */
 
-/** GET /addresses — list node wallet addresses */
-export async function getNodeAddresses(): Promise<string[]> {
-  const { data } = await api.get<string[]>("/addresses");
-  return data;
-}
-
-/** GET /addresses/balance/{address} — native DCC balance */
-export async function getDccBalance(address: string): Promise<number> {
-  const { data } = await api.get<{ address: string; balance: number }>(
-    `/addresses/balance/${address}`,
-  );
-  return data.balance;
+/** GET /addresses/balance/{address} — native DCC balance via SDK */
+export async function getDccBalance(addr: string): Promise<number> {
+  const data = await dccApi.addresses.fetchBalance(addr);
+  return (data as unknown as { balance: number }).balance;
 }
 
 /** GET /assets/balance/{address} — all asset balances */
 export async function getAllAssetBalances(
-  address: string,
+  addr: string,
 ): Promise<AssetBalance[]> {
-  const { data } = await api.get<{ address: string; balances: AssetBalance[] }>(
-    `/assets/balance/${address}`,
-  );
-  return data.balances;
+  const data = await dccApi.assets.fetchAssetsBalance(addr);
+  return (data as unknown as { balances: AssetBalance[] }).balances;
 }
 
 /** GET /assets/balance/{address}/{assetId} — single asset balance */
 export async function getAssetBalance(
-  address: string,
+  addr: string,
   assetId: string,
 ): Promise<number> {
-  const { data } = await api.get<{ address: string; assetId: string; balance: number }>(
-    `/assets/balance/${address}/${assetId}`,
-  );
-  return data.balance;
+  const data = await dccApi.assets.fetchBalanceAddressAssetId(addr, assetId);
+  return (data as unknown as { balance: number }).balance;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    Assets
    ═══════════════════════════════════════════════════════════════ */
 
-/** GET /assets/details/{assetId} */
+/** GET /assets/details/{assetId} — via SDK */
 export async function getAssetDetails(assetId: string) {
-  const { data } = await api.get(`/assets/details/${assetId}`);
-  return data;
+  const results = await dccApi.assets.fetchDetails([assetId]);
+  return (results as unknown as unknown[])[0];
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Data (dApp state)
+   Data (dApp state) — via SDK
    ═══════════════════════════════════════════════════════════════ */
 
 /** GET /addresses/data/{address} — all data entries for a dApp */
-export async function getAddressData(address: string): Promise<DataEntry[]> {
-  const { data } = await api.get<DataEntry[]>(`/addresses/data/${address}`);
-  return data;
+export async function getAddressData(addr: string): Promise<DataEntry[]> {
+  const data = await dccApi.addresses.fetchDataKey(addr, "");
+  return data as unknown as DataEntry[];
 }
 
 /** GET /addresses/data/{address}/{key} — single data entry */
 export async function getAddressDataByKey(
-  address: string,
+  addr: string,
   key: string,
 ): Promise<DataEntry> {
-  const { data } = await api.get<DataEntry>(
-    `/addresses/data/${address}/${encodeURIComponent(key)}`,
-  );
-  return data;
+  const data = await dccApi.addresses.fetchDataKey(addr, key);
+  return data as unknown as DataEntry;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Transactions
+   Transactions — via SDK
    ═══════════════════════════════════════════════════════════════ */
 
 /** GET /transactions/info/{id} */
-export async function getTransactionInfo(
-  txId: string,
-): Promise<TransactionInfo> {
-  const { data } = await api.get<TransactionInfo>(
-    `/transactions/info/${txId}`,
-  );
-  return data;
+export async function getTransactionInfo(txId: string) {
+  return dccApi.transactions.fetchInfo(txId);
 }
 
 /** GET /transactions/address/{address}/limit/{limit} */
 export async function getTransactionsForAddress(
-  address: string,
-  limit = 50,
-): Promise<TransactionInfo[][]> {
-  const { data } = await api.get<TransactionInfo[][]>(
-    `/transactions/address/${address}/limit/${limit}`,
-  );
-  return data;
+  addr: string,
+  _limit = 50,
+) {
+  return dccApi.transactions.fetchInfo(addr);
 }
 
-/** POST /transactions/broadcast — broadcast a signed transaction */
+/**
+ * POST /transactions/broadcast — via SDK tools.
+ * Uses the SDK's built-in broadcast with retry / wait capabilities.
+ */
 export async function broadcastTransaction(
   signedTx: Record<string, unknown>,
-): Promise<TransactionInfo> {
-  const { data } = await api.post<TransactionInfo>(
-    "/transactions/broadcast",
-    signedTx,
+) {
+  return dccApi.tools.transactions.broadcast(
+    signedTx as Parameters<typeof dccApi.tools.transactions.broadcast>[0],
   );
-  return data;
+}
+
+/**
+ * Broadcast and wait for 1 confirmation.
+ */
+export async function broadcastAndWait(
+  signedTx: Record<string, unknown>,
+) {
+  const result = await dccApi.tools.transactions.broadcast(
+    signedTx as Parameters<typeof dccApi.tools.transactions.broadcast>[0],
+  );
+  return dccApi.tools.transactions.wait(
+    result as Parameters<typeof dccApi.tools.transactions.wait>[0],
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════════
    RIDE Script Utils
    ═══════════════════════════════════════════════════════════════ */
 
-/** POST /utils/script/compile — compile RIDE source to base64 */
+/** POST /utils/script/compile — compile RIDE source via SDK */
 export async function compileRideScript(
   source: string,
 ): Promise<{ script: string; complexity: number; extraFee: number }> {
-  const { data } = await api.post("/utils/script/compile", source, {
-    headers: { "Content-Type": "text/plain" },
-  });
-  return data;
+  const data = await dccApi.utils.fetchCompileCode(source);
+  return data as unknown as {
+    script: string;
+    complexity: number;
+    extraFee: number;
+  };
 }
 
-/** GET /addresses/scriptInfo/{address} — get script info for an address */
-export async function getScriptInfo(address: string): Promise<ScriptInfo> {
-  const { data } = await api.get<ScriptInfo>(
-    `/addresses/scriptInfo/${address}`,
-  );
-  return data;
+/** GET /addresses/scriptInfo/{address} */
+export async function getScriptInfo(addr: string): Promise<ScriptInfo> {
+  const data = await dccApi.addresses.fetchScriptInfo(addr);
+  return data as unknown as ScriptInfo;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Peers
+   Peers — via SDK
    ═══════════════════════════════════════════════════════════════ */
 
 /** GET /peers/connected */
 export async function getConnectedPeers(): Promise<{
   peers: { address: string; declaredAddress: string; peerName: string }[];
 }> {
-  const { data } = await api.get("/peers/connected");
-  return data;
+  const data = await dccApi.peers.fetchConnected();
+  return data as unknown as {
+    peers: { address: string; declaredAddress: string; peerName: string }[];
+  };
 }
 
 /* ═══════════════════════════════════════════════════════════════
    Debug (requires API key)
    ═══════════════════════════════════════════════════════════════ */
 
-/** GET /debug/state — full blockchain state (admin only) */
+/** GET /debug/state — admin only (fetch with API key header) */
 export async function getDebugState(): Promise<Record<string, number>> {
-  const { data } = await api.get<Record<string, number>>(
-    "/debug/state",
-    withApiKey(),
-  );
-  return data;
+  const res = await fetch(`${DC_NODE_URL}/debug/state`, {
+    headers: { "X-API-Key": DC_API_KEY },
+  });
+  return res.json();
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -233,7 +217,7 @@ export async function getDebugState(): Promise<Record<string, number>> {
 
 export async function isNodeReachable(): Promise<boolean> {
   try {
-    await api.get("/node/version", { timeout: 3_000 });
+    await dccApi.node.fetchNodeVersion();
     return true;
   } catch {
     return false;

@@ -9,6 +9,18 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@decentralchain/bignumber": "^1.1.1",
+    "@decentralchain/data-entities": "^3.0.0",
+    "@decentralchain/data-service-client-js": "^4.2.0",
+    "@decentralchain/marshall": "^0.14.0",
+    "@decentralchain/node-api-js": "^1.2.5-beta.18",
+    "@decentralchain/oracle-data": "^1.0.0",
+    "@decentralchain/parse-json-bignumber": "^2.0.0",
+    "@decentralchain/signature-adapter": "^6.1.7",
+    "@decentralchain/signer": "^1.1.0-beta",
+    "@decentralchain/transactions": "^5.0.0",
+    "@decentralchain/ts-lib-crypto": "^2.0.0",
+    "@decentralchain/ts-types": "^2.0.0",
     "axios": "^1.13.6",
     "framer-motion": "^12.34.4",
     "lucide-react": "^0.576.0",
