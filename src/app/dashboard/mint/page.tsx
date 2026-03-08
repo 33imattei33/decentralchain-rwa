@@ -26,13 +26,8 @@ import {
   Check,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import {
-  mintRwaToken,
-  type MintResult,
-  type MintStep,
-} from "@/lib/mintService";
+import { type MintResult, type MintStep } from "@/lib/mintService";
 import { useWallet } from "@/hooks/useWallet";
-import { isNodeReachable } from "@/lib/nodeApi";
 import { DC_NODE_URL } from "@/lib/constants";
 
 /* ── RWA categories ── */
@@ -102,6 +97,8 @@ export default function MintPage() {
   const [mintDetail, setMintDetail] = useState<string>("");
   const [nodeOnline, setNodeOnline] = useState<boolean | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [senderBalance, setSenderBalance] = useState<number | null>(null);
+  const [senderAddress, setSenderAddress] = useState<string | null>(null);
 
   const { address, publicKey, connect, isConnecting } = useWallet();
 
@@ -121,9 +118,61 @@ export default function MintPage() {
 
   /* Check node on step 4 */
   const checkNodeStatus = useCallback(async () => {
-    const online = await isNodeReachable();
-    setNodeOnline(online);
-    return online;
+    try {
+      const res = await fetch("/api/node/test");
+      const data = await res.json();
+      const online = !!data.nodeVersion;
+      setNodeOnline(online);
+      if (online) {
+        toast.success(`Node online: ${data.nodeVersion?.version ?? "connected"}, Block: ${data.blockHeight?.height ?? "?"}`)
+      }
+      return online;
+    } catch {
+      setNodeOnline(false);
+      return false;
+    }
+  }, []);
+
+  /* Check balance when seed changes */
+  const checkBalance = useCallback(async (seedPhrase: string) => {
+    if (!seedPhrase || seedPhrase.trim().split(/\s+/).length < 12) {
+      setSenderBalance(null);
+      setSenderAddress(null);
+      return;
+    }
+    try {
+      // Use the server-side API to derive address and check balance
+      const res = await fetch("/api/mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          seed: seedPhrase,
+          name: "BalCheck1234",
+          description: "balance check",
+          quantity: 1,
+          category: "test",
+          location: "test",
+          totalValuation: 0,
+          yieldAPY: 0,
+          ipfsHash: "test",
+          _checkOnly: true,
+        }),
+      });
+      const data = await res.json();
+      if (data.senderAddress) {
+        setSenderAddress(data.senderAddress);
+      }
+      if (data.balance !== undefined) {
+        setSenderBalance(data.balance);
+      } else if (data.error?.includes("Insufficient")) {
+        // Parse balance from error
+        const match = data.balance;
+        setSenderBalance(match ?? 0);
+        setSenderAddress(data.senderAddress ?? null);
+      }
+    } catch {
+      // silent
+    }
   }, []);
 
   const canProceed = (): boolean => {
@@ -146,7 +195,7 @@ export default function MintPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  /** Real on-chain minting via @decentralchain/transactions SDK */
+  /** Real on-chain minting via server-side API route */
   const handleMint = async () => {
     setMinting(true);
     setMintStep(null);
@@ -160,11 +209,22 @@ export default function MintPage() {
         return;
       }
 
-      const result = await mintRwaToken(
-        {
+      // Step 1: Checking balance
+      setMintStep("compiling");
+      setMintDetail("Checking account balance...");
+
+      // Step 2: Issue token via server-side API
+      setMintStep("issuing");
+      setMintDetail(`Issuing ${fractions.toLocaleString()} fractional tokens via API...`);
+
+      const res = await fetch("/api/mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          seed: form.seed,
           name: form.title,
           description: form.description,
-          totalFractions: fractions,
+          quantity: fractions,
           decimals: 0,
           reissuable: false,
           kycRequired: form.kycRequired,
@@ -175,21 +235,54 @@ export default function MintPage() {
           totalValuation: valuation,
           yieldAPY,
           imageUrl: form.imageUrl || undefined,
-          seed: form.seed || undefined,
-          senderPublicKey: publicKey || undefined,
-        },
-        (stepName, detail) => {
-          setMintStep(stepName);
-          setMintDetail(detail ?? "");
-        },
-      );
+        }),
+      });
 
+      const data = await res.json();
+
+      if (!res.ok) {
+        // Show detailed error from server
+        const errMsg = data.error || "Minting failed";
+        const stepsInfo = data.steps
+          ? "\n\nSteps: " + data.steps.map((s: { step: string; status: string; detail?: string }) => `${s.step}: ${s.status}${s.detail ? " - " + s.detail : ""}`).join("\n")
+          : "";
+        throw new Error(errMsg + stepsInfo);
+      }
+
+      // Step 3: Confirming
+      setMintStep("confirming");
+      setMintDetail("Transaction broadcast! Verifying on blockchain...");
+
+      // Verify the transaction exists
+      try {
+        const verifyRes = await fetch(`/api/tx/${data.assetId}`);
+        const verifyData = await verifyRes.json();
+        if (verifyData.found) {
+          setMintDetail(`Confirmed in blockchain! Status: ${verifyData.status}`);
+        }
+      } catch {
+        // verification is supplementary
+      }
+
+      // Build result
+      const result: MintResult = {
+        assetId: data.assetId,
+        issueTxId: data.issueTxId,
+        dataTxId: data.dataTxId ?? undefined,
+        blockHeight: data.blockHeight ?? 0,
+        feePaid: data.feePaid ?? 100_000_000,
+        status: data.confirmed ? "confirmed" : "pending",
+        timestamp: data.timestamp ?? new Date().toISOString(),
+      };
+
+      setMintStep("done");
+      setMintDetail("RWA token minted successfully!");
       setMintResult(result);
       setMinted(true);
-      toast.success(`RWA Token minted! Asset ID: ${result.assetId.slice(0, 8)}…`);
+      toast.success(`RWA Token minted! Asset ID: ${result.assetId.slice(0, 8)}...`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Minting failed";
-      toast.error(msg);
+      toast.error(msg, { duration: 8000 });
       setMintStep("error");
       setMintDetail(msg);
     } finally {
@@ -210,7 +303,7 @@ export default function MintPage() {
         </div>
         <div className="flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-400">
           <Sparkles size={14} />
-          RIDE v6 Smart Asset
+          RIDE v5 Smart Asset
         </div>
       </div>
 
@@ -447,7 +540,7 @@ export default function MintPage() {
                       active={!!form.ipfsHash}
                     />
                     <ComplianceItem
-                      label="RIDE v6 Script"
+                      label="RIDE v5 Script"
                       active
                     />
                     <ComplianceItem
@@ -527,7 +620,7 @@ export default function MintPage() {
                         value={[
                           form.kycRequired && "KYC",
                           form.accreditedOnly && "Accredited",
-                          "RIDE v6",
+                          "RIDE v5",
                         ]
                           .filter(Boolean)
                           .join(" · ")}
@@ -571,12 +664,44 @@ export default function MintPage() {
                       <input
                         type="password"
                         value={form.seed}
-                        onChange={(e) => set("seed", e.target.value)}
-                        placeholder="Enter 15-word seed phrase for server-side signing…"
+                        onChange={(e) => {
+                          set("seed", e.target.value);
+                          // Auto-check balance when seed looks complete (15 words)
+                          const words = e.target.value.trim().split(/\s+/);
+                          if (words.length >= 12) {
+                            checkBalance(e.target.value);
+                          } else {
+                            setSenderBalance(null);
+                            setSenderAddress(null);
+                          }
+                        }}
+                        placeholder="Enter 15-word seed phrase for signing…"
                         className="w-full rounded-xl border border-white/5 bg-gray-900 px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none focus:border-cyan-500/40"
                       />
+
+                      {/* Balance display */}
+                      {senderAddress && (
+                        <div className="mt-2 rounded-lg border border-white/5 bg-gray-900/50 p-2.5 text-[11px]">
+                          <div className="flex items-center justify-between text-gray-400">
+                            <span>Address:</span>
+                            <span className="font-mono text-cyan-400">{senderAddress.slice(0, 8)}…{senderAddress.slice(-6)}</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between">
+                            <span className="text-gray-400">Balance:</span>
+                            <span className={`font-medium ${senderBalance !== null && senderBalance >= 101_000_000 ? "text-emerald-400" : "text-red-400"}`}>
+                              {senderBalance !== null ? `${(senderBalance / 1e8).toFixed(4)} DCC` : "checking…"}
+                            </span>
+                          </div>
+                          {senderBalance !== null && senderBalance < 101_000_000 && (
+                            <p className="mt-1.5 text-[10px] text-red-400/80">
+                              Need at least 1.01 DCC to mint (1 DCC issue fee + 0.01 metadata fee)
+                            </p>
+                          )}
+                        </div>
+                      )}
+
                       <p className="mt-1.5 text-[10px] text-gray-600">
-                        The seed phrase is used locally to sign the Issue transaction via the SDK. It is never sent to any server.
+                        Seed phrase is sent to the server API route for signing. Transaction is signed server-side and broadcast to the DCC mainnet node.
                       </p>
                     </div>
                   </Card>
@@ -606,7 +731,7 @@ export default function MintPage() {
                     <div className="space-y-3 text-xs text-gray-400">
                       <ActionStep
                         n={1}
-                        label="Compile RIDE v6 Smart Asset script"
+                        label="Compile RIDE v5 Smart Asset script"
                         active={mintStep === "compiling"}
                         done={mintStep !== null && mintStep !== "compiling" && mintStep !== "error"}
                       />
@@ -706,7 +831,7 @@ export default function MintPage() {
               on DecentralChain.
             </p>
             <p className="mb-6 text-xs text-gray-500">
-              {form.kycRequired ? "RIDE v6 Smart Asset with embedded KYC enforcement" : "Standard token without transfer restrictions"}
+              {form.kycRequired ? "RIDE v5 Smart Asset with embedded KYC enforcement" : "Standard token without transfer restrictions"}
             </p>
 
             <div className="mb-6 rounded-xl border border-white/5 bg-gray-900/60 p-4 text-left">

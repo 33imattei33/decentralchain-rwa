@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-#  RWA Escrow Smart Asset Script — DecentralChain (RIDE v6)
+#  RWA Escrow Smart Asset Script — DecentralChain (RIDE v5)
 # ──────────────────────────────────────────────────────────────
 #  This script is attached to the Smart Asset that represents
 #  fractional ownership of a Real-World Asset.
@@ -12,7 +12,7 @@
 #    3. Only the issuer can reissue or burn tokens.
 # ──────────────────────────────────────────────────────────────
 
-{-# STDLIB_VERSION 6 #-}
+{-# STDLIB_VERSION 5 #-}
 {-# CONTENT_TYPE EXPRESSION #-}
 {-# SCRIPT_TYPE ASSET #-}
 

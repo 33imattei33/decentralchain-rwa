@@ -15,7 +15,7 @@ const layers = [
     color: "from-violet-500 to-violet-600",
     border: "border-violet-500/20",
     bg: "bg-violet-500/10",
-    items: ["RIDE v6 Scripts", "Smart Assets", "Escrow dApp", "KYC Registry"],
+    items: ["RIDE v5 Scripts", "Smart Assets", "Escrow dApp", "KYC Registry"],
   },
   {
     label: "Blockchain Layer",

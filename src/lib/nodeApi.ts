@@ -167,16 +167,21 @@ export async function broadcastAndWait(
    RIDE Script Utils
    ═══════════════════════════════════════════════════════════════ */
 
-/** POST /utils/script/compile — compile RIDE source via SDK */
+/** POST /utils/script/compile — compile RIDE source via direct fetch (text/plain) */
 export async function compileRideScript(
   source: string,
 ): Promise<{ script: string; complexity: number; extraFee: number }> {
-  const data = await dccApi.utils.fetchCompileCode(source);
-  return data as unknown as {
-    script: string;
-    complexity: number;
-    extraFee: number;
-  };
+  // Use direct fetch with text/plain content-type (required by DCC node)
+  const res = await fetch(`${DC_NODE_URL}/utils/script/compile`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: source,
+  });
+  const data = await res.json();
+  if (!data.script) {
+    throw new Error(data.message || "RIDE compilation failed");
+  }
+  return data as { script: string; complexity: number; extraFee: number };
 }
 
 /** GET /addresses/scriptInfo/{address} */

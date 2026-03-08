@@ -2,7 +2,7 @@
  * RWA Token Minting Service — DecentralChain
  *
  * Handles the full on-chain flow for tokenizing a real-world asset:
- *   1. Compile RIDE v6 Smart Asset script (KYC whitelist enforcement)
+ *   1. Compile RIDE v5 Smart Asset script (KYC whitelist enforcement)
  *   2. Issue the fractional token via a Type 3 (Issue) transaction
  *   3. Optionally attach the compiled asset script (Type 15 - SetAssetScript)
  *   4. Register the asset in the marketplace dApp (Type 16 - InvokeScript)
@@ -87,11 +87,11 @@ export interface MintResult {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   RIDE v6 Smart Asset Script — KYC Whitelist Enforcement
+   RIDE v5 Smart Asset Script — KYC Whitelist Enforcement
    ═══════════════════════════════════════════════════════════════ */
 
 /**
- * Generate a RIDE v6 Asset script that restricts transfers to
+ * Generate a RIDE v5 Asset script that restricts transfers to
  * KYC-verified addresses registered in the marketplace dApp.
  */
 function generateKycAssetScript(
@@ -99,7 +99,7 @@ function generateKycAssetScript(
   accreditedOnly: boolean,
 ): string {
   return `
-{-# STDLIB_VERSION 6 #-}
+{-# STDLIB_VERSION 5 #-}
 {-# CONTENT_TYPE EXPRESSION #-}
 {-# SCRIPT_TYPE ASSET #-}
 
@@ -192,7 +192,7 @@ export async function mintRwaToken(
 
   // ── Step 1: Compile RIDE script (if KYC enforcement requested) ──
   if (kycRequired) {
-    onProgress?.("compiling", "Compiling RIDE v6 Smart Asset script…");
+    onProgress?.("compiling", "Compiling RIDE v5 Smart Asset script…");
     try {
       const rideSource = generateKycAssetScript(
         MARKETPLACE_DAPP,

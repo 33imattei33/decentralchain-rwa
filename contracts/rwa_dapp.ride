@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-#  RWA Marketplace dApp Script — DecentralChain (RIDE v6)
+#  RWA Marketplace dApp Script — DecentralChain (RIDE v5)
 # ──────────────────────────────────────────────────────────────
 #  Deployed to the marketplace account. Handles:
 #    • Buying fractional RWA tokens with CRS
@@ -7,7 +7,7 @@
 #    • KYC whitelist management (issuer-only)
 # ──────────────────────────────────────────────────────────────
 
-{-# STDLIB_VERSION 6 #-}
+{-# STDLIB_VERSION 5 #-}
 {-# CONTENT_TYPE DAPP #-}
 {-# SCRIPT_TYPE ACCOUNT #-}
 
